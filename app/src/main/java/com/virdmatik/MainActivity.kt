@@ -16,6 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -128,6 +129,7 @@ private fun DayContent(title: String, date: String, items: List<ZikirProgressRow
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CounterScreen(onBack: () -> Unit, vm: CounterViewModel = hiltViewModel()) {
     val state by vm.state.collectAsStateWithLifecycle()
