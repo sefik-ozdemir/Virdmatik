@@ -90,12 +90,22 @@ private fun HomeScreen(onCounter: (Long, String) -> Unit, vm: HomeViewModel = hi
         date = state.date,
         items = state.items,
         progress = state.progress,
-        onCounter = onCounter
+        onCounter = onCounter,
+        onComplete = vm::complete
     )
 }
 
 @Composable
-private fun DayContent(title: String, date: String, items: List<ZikirProgressRow>, progress: Float, onCounter: (Long, String) -> Unit) {
+private fun DayContent(
+    title: String,
+    date: String,
+    items: List<ZikirProgressRow>,
+    progress: Float,
+    onCounter: (Long, String) -> Unit,
+    onComplete: (Long) -> Unit
+) {
+    var pendingComplete by remember(date) { mutableStateOf<ZikirProgressRow?>(null) }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 18.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -109,6 +119,7 @@ private fun DayContent(title: String, date: String, items: List<ZikirProgressRow
             Spacer(Modifier.height(8.dp))
             LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
         }
+
         items(items, key = { it.id }) { item ->
             Card(Modifier.fillMaxWidth().clickable { onCounter(item.id, date) }) {
                 Column(Modifier.padding(18.dp)) {
@@ -121,11 +132,51 @@ private fun DayContent(title: String, date: String, items: List<ZikirProgressRow
                         progress = { if (item.target == 0) 0f else (item.count.toFloat() / item.target).coerceIn(0f, 1f) },
                         modifier = Modifier.fillMaxWidth()
                     )
-                    if (item.completed) { Spacer(Modifier.height(8.dp)); Text("✓ Tamamlandı", color = MaterialTheme.colorScheme.primary) }
+                    Spacer(Modifier.height(10.dp))
+
+                    if (item.completed) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.CheckCircle, null, tint = MaterialTheme.colorScheme.primary)
+                            Spacer(Modifier.width(6.dp))
+                            Text("Tamamlandı", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+                        }
+                    } else {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            OutlinedButton(onClick = { pendingComplete = item }) {
+                                Icon(Icons.Default.Check, null)
+                                Spacer(Modifier.width(6.dp))
+                                Text("Bitti")
+                            }
+                        }
+                    }
                 }
             }
         }
+
         if (items.isEmpty()) item { Text("Günlük kayıt hazırlanıyor…") }
+    }
+
+    pendingComplete?.let { item ->
+        AlertDialog(
+            onDismissRequest = { pendingComplete = null },
+            icon = { Icon(Icons.Default.CheckCircle, null) },
+            title = { Text("Zikir tamamlandı mı?") },
+            text = {
+                Text(
+                    "${item.name} zikrini tamamladığınızı onaylıyor musunuz? " +
+                        "Onaylarsanız ${item.count}/${item.target} kaydı ${item.target}/${item.target} olarak tamamlanacak."
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    onComplete(item.id)
+                    pendingComplete = null
+                }) { Text("Evet, bitti") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingComplete = null }) { Text("Vazgeç") }
+            }
+        )
     }
 }
 
@@ -190,7 +241,7 @@ private fun CounterScreen(onBack: () -> Unit, vm: CounterViewModel = hiltViewMod
 }
 
 @Composable
-private fun HistoryScreen(onCounter: (Long, String) -> Unit, vm: HistoryViewModel = hiltViewModel(), homeVm: HomeViewModel = hiltViewModel()) {
+private fun HistoryScreen(onCounter: (Long, String) -> Unit, vm: HistoryViewModel = hiltViewModel()) {
     val history by vm.history.collectAsStateWithLifecycle()
     var selectedDate by remember { mutableStateOf<String?>(null) }
     if (selectedDate != null) {
@@ -225,7 +276,16 @@ private fun HistoricalDayScreen(date: String, onBack: () -> Unit, onCounter: (Lo
             IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Geri") }
             Text("Kaza Virdi", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         }
-        Box(Modifier.weight(1f)) { DayContent("Eksik Günü Tamamla", date, state.items, state.progress, onCounter) }
+        Box(Modifier.weight(1f)) {
+            DayContent(
+                title = "Eksik Günü Tamamla",
+                date = date,
+                items = state.items,
+                progress = state.progress,
+                onCounter = onCounter,
+                onComplete = vm::complete
+            )
+        }
     }
 }
 
