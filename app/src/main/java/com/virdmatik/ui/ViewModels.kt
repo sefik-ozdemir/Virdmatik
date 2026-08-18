@@ -4,7 +4,6 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.virdmatik.data.local.DayProgressRow
-import com.virdmatik.data.local.DailyRecordEntity
 import com.virdmatik.data.local.ZikirEntity
 import com.virdmatik.data.local.ZikirProgressRow
 import com.virdmatik.data.repository.VirdRepository
@@ -42,6 +41,10 @@ class HomeViewModel @Inject constructor(private val repo: VirdRepository) : View
             _date.value = LocalDate.now().toString()
         }
     }
+
+    fun complete(id: Long) {
+        viewModelScope.launch { repo.complete(_date.value, id) }
+    }
 }
 
 data class CounterUiState(
@@ -77,6 +80,7 @@ class CounterViewModel @Inject constructor(
         if (_state.value.completed) return
         viewModelScope.launch { repo.increment(date, zikirId) }
     }
+
     fun undo() {
         if (_state.value.count <= 0) return
         viewModelScope.launch { repo.decrement(date, zikirId) }
@@ -109,6 +113,7 @@ class HistoricalDayViewModel @Inject constructor(private val repo: VirdRepositor
     private val _state = MutableStateFlow(DayUiState())
     val state = _state.asStateFlow()
     private var loadedDate: String? = null
+
     fun load(date: String) {
         if (loadedDate == date) return
         loadedDate = date
@@ -116,5 +121,10 @@ class HistoricalDayViewModel @Inject constructor(private val repo: VirdRepositor
             repo.ensureDay(date)
             repo.observeDay(date).collect { _state.value = DayUiState(date, it, false) }
         }
+    }
+
+    fun complete(id: Long) {
+        val date = loadedDate ?: return
+        viewModelScope.launch { repo.complete(date, id) }
     }
 }
