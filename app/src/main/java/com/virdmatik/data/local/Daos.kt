@@ -73,6 +73,15 @@ interface DailyRecordDao {
     suspend fun decrement(date: String, zikirId: Long, now: Long = System.currentTimeMillis())
 
     @Query("""
+        UPDATE daily_records SET
+        count = targetSnapshot,
+        isCompleted = 1,
+        updatedAt = :now
+        WHERE date = :date AND zikirId = :zikirId
+    """)
+    suspend fun complete(date: String, zikirId: Long, now: Long = System.currentTimeMillis())
+
+    @Query("""
         SELECT date,
                SUM(count) AS totalCount,
                SUM(targetSnapshot) AS totalTarget,
