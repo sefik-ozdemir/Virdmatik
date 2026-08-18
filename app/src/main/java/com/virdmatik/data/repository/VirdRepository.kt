@@ -52,9 +52,10 @@ class VirdRepository @Inject constructor(
     suspend fun getZikir(id: Long) = zikirDao.getById(id)
     suspend fun increment(date: String, id: Long) = dailyDao.increment(date, id)
     suspend fun decrement(date: String, id: Long) = dailyDao.decrement(date, id)
+    suspend fun complete(date: String, id: Long) = dailyDao.complete(date, id)
 
     suspend fun addZikir(name: String, target: Int) {
-        val id = zikirDao.insert(ZikirEntity(name = name.trim(), target = target, sortOrder = Int.MAX_VALUE))
+        zikirDao.insert(ZikirEntity(name = name.trim(), target = target, sortOrder = Int.MAX_VALUE))
         ensureDay(LocalDate.now().toString())
     }
 
