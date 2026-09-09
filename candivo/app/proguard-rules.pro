@@ -1,0 +1,1 @@
+-keepclassmembers class com.haber73.candivo.MainActivity$AndroidBridge { @android.webkit.JavascriptInterface <methods>; }
