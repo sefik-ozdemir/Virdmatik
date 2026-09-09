@@ -1,0 +1,61 @@
+plugins { id 'com.android.application' }
+
+def releaseProp = { String name -> providers.gradleProperty(name).orElse("").get() }
+def sampleAppId = "ca-app-pub-3940256099942544~3347511713"
+def sampleRewarded = "ca-app-pub-3940256099942544/5224354917"
+def sampleInterstitial = "ca-app-pub-3940256099942544/1033173712"
+
+android {
+    namespace 'com.haber73.candivo'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'com.haber73.candivo'
+        minSdk 23
+        targetSdk 36
+        versionCode 21
+        versionName '0.11.0'
+    }
+
+    buildFeatures { buildConfig true }
+
+    buildTypes {
+        debug {
+            manifestPlaceholders = [ADMOB_APP_ID: sampleAppId]
+            buildConfigField 'String', 'ADMOB_REWARDED_ID', '"' + sampleRewarded + '"'
+            buildConfigField 'String', 'ADMOB_INTERSTITIAL_ID', '"' + sampleInterstitial + '"'
+            buildConfigField 'boolean', 'ADMOB_TEST_MODE', 'true'
+        }
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            def appId = releaseProp('ADMOB_APP_ID') ?: 'ca-app-pub-0000000000000000~0000000000'
+            def rewarded = releaseProp('ADMOB_REWARDED_ID') ?: 'ca-app-pub-0000000000000000/0000000000'
+            def interstitial = releaseProp('ADMOB_INTERSTITIAL_ID') ?: 'ca-app-pub-0000000000000000/0000000000'
+            manifestPlaceholders = [ADMOB_APP_ID: appId]
+            buildConfigField 'String', 'ADMOB_REWARDED_ID', '"' + rewarded + '"'
+            buildConfigField 'String', 'ADMOB_INTERSTITIAL_ID', '"' + interstitial + '"'
+            buildConfigField 'boolean', 'ADMOB_TEST_MODE', 'false'
+        }
+    }
+
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+    packaging { resources { excludes += ['/META-INF/{AL2.0,LGPL2.1}'] } }
+}
+
+def requiredAdMobProps = ['ADMOB_APP_ID','ADMOB_REWARDED_ID','ADMOB_INTERSTITIAL_ID']
+tasks.configureEach { task ->
+    if (task.name in ['assembleRelease','bundleRelease']) {
+        task.doFirst {
+            def missing = requiredAdMobProps.findAll { !(providers.gradleProperty(it).orElse('').get()?.trim()) }
+            if (!missing.isEmpty()) throw new GradleException('Canlı release engellendi. Eksik AdMob Gradle özellikleri: ' + missing.join(', ') + '. config/admob.properties.example dosyasına bak.')
+        }
+    }
+}
+
+dependencies {
+    implementation 'com.google.android.gms:play-services-auth:21.6.0'
+    implementation 'com.google.android.gms:play-services-ads:25.4.0'
+    implementation 'com.google.android.ump:user-messaging-platform:4.0.0'
+}
