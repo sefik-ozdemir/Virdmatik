@@ -1,6 +1,8 @@
 name: Build Candivo v0.11.0 test APK
 
 on:
+  push:
+    branches: [ candivo-v0110-test-build ]
   workflow_dispatch:
 
 permissions:
@@ -10,4 +12,49 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - run: echo "Candivo assets are being prepared"
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Restore embedded Candivo web assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p candivo/app/src/main/assets
+          cat candivo/webparts/assets.part* | base64 -d > /tmp/candivo-web-assets.zip
+          unzip -t /tmp/candivo-web-assets.zip
+          unzip -o /tmp/candivo-web-assets.zip -d candivo/app/src/main/assets
+          test -s candivo/app/src/main/assets/index.html
+          test -s candivo/app/src/main/assets/firebase-candivo.js
+          grep -q 'monetization.js' candivo/app/src/main/assets/index.html
+          ls -lh candivo/app/src/main/assets
+
+      - name: Build debug APK
+        working-directory: candivo
+        run: gradle :app:assembleDebug --stacktrace
+
+      - name: Verify APK
+        shell: bash
+        run: |
+          test -f candivo/app/build/outputs/apk/debug/app-debug.apk
+          ls -lh candivo/app/build/outputs/apk/debug/app-debug.apk
+          sha256sum candivo/app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload test APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Candivo-v0.11.0-test-apk
+          path: candivo/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
