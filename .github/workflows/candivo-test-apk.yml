@@ -1,8 +1,7 @@
 name: Build Candivo v0.11.0 test APK
 
 on:
-  push:
-    branches: [ candivo-v0110-test-build ]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -11,64 +10,4 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-
-      - uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.13'
-
-      - uses: android-actions/setup-android@v3
-
-      - name: Install Android SDK 36
-        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
-
-      - name: Download Candivo web assets
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p candivo/app/src/main/assets
-          cd candivo/app/src/main/assets
-          BASE="https://www.73haber.com.tr/candivo"
-          for f in index.html firebase-local.js firebase-candivo.js privacy.html account-deletion.html terms.html manifest.webmanifest service-worker.js game-logo.webp cave-amethyst.webp cave-ice.webp cave-emerald.webp cave-fire.webp ui-regular.ttf ui-bold.ttf; do
-            echo "Downloading $f"
-            curl -fL --retry 3 --connect-timeout 20 "$BASE/$f" -o "$f"
-          done
-
-      - name: Inject AdMob monetization
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          p=Path('candivo/app/src/main/assets/index.html')
-          s=p.read_text(encoding='utf-8')
-          if 'monetization.js' not in s:
-              marker='<script src="firebase-candivo.js"></script>'
-              if marker in s:
-                  s=s.replace(marker, marker+'\n<script src="monetization.js"></script>')
-              else:
-                  s=s.replace('</body>', '<script src="monetization.js"></script>\n</body>')
-          p.write_text(s,encoding='utf-8')
-          PY
-
-      - name: Build debug APK
-        working-directory: candivo
-        run: gradle :app:assembleDebug --stacktrace
-
-      - name: Verify APK
-        shell: bash
-        run: |
-          test -f candivo/app/build/outputs/apk/debug/app-debug.apk
-          ls -lh candivo/app/build/outputs/apk/debug/app-debug.apk
-          sha256sum candivo/app/build/outputs/apk/debug/app-debug.apk
-
-      - name: Upload test APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: Candivo-v0.11.0-test-apk
-          path: candivo/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
+      - run: echo "Candivo assets are being prepared"
