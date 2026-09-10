@@ -32,11 +32,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p candivo/app/src/main/assets candivo/app/src/main/res/drawable
-          base='https://www.73haber.com.tr/candivo'
-          for f in index.html firebase-local.js account-deletion.html cave-amethyst.webp cave-emerald.webp cave-fire.webp cave-ice.webp game-logo.webp icon.png icon.svg manifest.webmanifest privacy.html service-worker.js terms.html ui-bold.ttf ui-regular.ttf; do
-            curl -fsSL --retry 3 --retry-delay 2 "$base/$f" -o "candivo/app/src/main/assets/$f"
-          done
+          mkdir -p candivo/app/src/main/assets candivo/app/src/main/res/drawable /tmp/candivo-web
+
+          cat candivo/webparts/assets.part* | base64 -d > /tmp/candivo-web.zip
+          unzip -q /tmp/candivo-web.zip -d /tmp/candivo-web
+          index_path="$(find /tmp/candivo-web -type f -name index.html | head -n 1)"
+          test -n "$index_path"
+          web_root="$(dirname "$index_path")"
+          rm -rf candivo/app/src/main/assets/*
+          cp -a "$web_root"/. candivo/app/src/main/assets/
+
           cat candivo/patches/firebase-v013.part0* | base64 -d | gzip -d > candivo/app/src/main/assets/firebase-candivo.js
           cat candivo/patches/ui-v013.js.gz.b64 candivo/patches/gameplay-v013.js.gz.b64 | base64 -d | gzip -d > candivo/app/src/main/assets/monetization.js
           base64 -d candivo/branding/candivo-old-logo.webp.b64 > candivo/app/src/main/res/drawable/candivo_old_logo.webp
@@ -75,8 +80,6 @@ jobs:
           s=p.read_text()
           s=s.replace('s.setAllowFileAccess(false);','s.setAllowFileAccess(true);\n        if (android.os.Build.VERSION.SDK_INT >= 16) {\n            s.setAllowFileAccessFromFileURLs(true);\n            s.setAllowUniversalAccessFromFileURLs(true);\n        }')
           s=s.replace('webView.loadUrl(GAME_URL);','webView.loadUrl("file:///android_asset/index.html");')
-          # File build loads monetization.js directly from index.html; do not inject it a second time.
-          s=s.replace('if (isCandivoUrl(Uri.parse(url))) injectBundledMonetization();','if (isCandivoUrl(Uri.parse(url))) injectBundledMonetization();')
 
           old='''            @Override public void onAdFailedToLoad(LoadAdError error) {\n                rewardedAd = null;\n                Log.w(TAG, "Rewarded load: " + error);\n            }'''
           new='''            @Override public void onAdFailedToLoad(LoadAdError error) {\n                rewardedAd = null;\n                Log.w(TAG, "Rewarded load: " + error);\n                if (webView != null) webView.postDelayed(() -> loadRewarded(), 4000);\n            }'''
