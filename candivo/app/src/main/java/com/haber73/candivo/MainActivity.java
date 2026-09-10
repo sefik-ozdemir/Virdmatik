@@ -34,9 +34,15 @@ import com.google.android.ump.UserMessagingPlatform;
 
 import org.json.JSONObject;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+
 public class MainActivity extends Activity {
     private static final String TAG = "Candivo";
     private static final int RC_GOOGLE = 7301;
+    private static final String GAME_URL = "https://www.73haber.com.tr/candivo/";
+
     private WebView webView;
     private GoogleSignInClient googleClient;
     private ConsentInformation consentInformation;
@@ -62,40 +68,69 @@ public class MainActivity extends Activity {
     private void setupWebView() {
         webView = new WebView(this);
         setContentView(webView);
+
         WebSettings s = webView.getSettings();
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
         s.setDatabaseEnabled(true);
-        s.setAllowFileAccess(true);
+        s.setAllowFileAccess(false);
         s.setAllowContentAccess(false);
         s.setMediaPlaybackRequiresUserGesture(false);
-        if (android.os.Build.VERSION.SDK_INT >= 16) {
-            s.setAllowFileAccessFromFileURLs(true);
-            s.setAllowUniversalAccessFromFileURLs(true);
-        }
+
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG);
         webView.setWebChromeClient(new WebChromeClient());
         webView.setWebViewClient(new WebViewClient() {
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 return openExternalIfNeeded(request.getUrl());
             }
+
             @Override public boolean shouldOverrideUrlLoading(WebView view, String url) {
                 return openExternalIfNeeded(Uri.parse(url));
             }
+
+            @Override public void onPageFinished(WebView view, String url) {
+                super.onPageFinished(view, url);
+                if (isCandivoUrl(Uri.parse(url))) injectBundledMonetization();
+            }
         });
+
         webView.addJavascriptInterface(new AndroidBridge(), "CandivoAndroid");
-        webView.loadUrl("file:///android_asset/index.html");
+        webView.loadUrl(GAME_URL);
+    }
+
+    private boolean isCandivoUrl(Uri uri) {
+        if (uri == null || !"https".equalsIgnoreCase(uri.getScheme())) return false;
+        String host = uri.getHost();
+        if (host == null) return false;
+        boolean trustedHost = host.equalsIgnoreCase("73haber.com.tr") || host.equalsIgnoreCase("www.73haber.com.tr");
+        String path = uri.getPath();
+        return trustedHost && path != null && (path.equals("/candivo") || path.startsWith("/candivo/"));
     }
 
     private boolean openExternalIfNeeded(Uri uri) {
         if (uri == null) return false;
+        if (isCandivoUrl(uri)) return false;
+
         String scheme = uri.getScheme();
-        if ("file".equalsIgnoreCase(scheme) || "about".equalsIgnoreCase(scheme)) return false;
+        if ("about".equalsIgnoreCase(scheme)) return false;
         if ("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme) || "mailto".equalsIgnoreCase(scheme)) {
             try { startActivity(new Intent(Intent.ACTION_VIEW, uri)); } catch (Exception ignored) {}
             return true;
         }
         return false;
+    }
+
+    private void injectBundledMonetization() {
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(
+                getAssets().open("monetization.js"), StandardCharsets.UTF_8))) {
+            StringBuilder script = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) script.append(line).append('\n');
+            webView.evaluateJavascript(script.toString(), null);
+            Log.i(TAG, "Bundled monetization injected");
+        } catch (Exception error) {
+            Log.e(TAG, "Monetization injection failed", error);
+        }
     }
 
     private void requestConsentAndInitializeAds() {
@@ -128,19 +163,41 @@ public class MainActivity extends Activity {
         if (!adsInitialized || rewardedAd != null) return;
         RewardedAd.load(this, BuildConfig.ADMOB_REWARDED_ID, new AdRequest.Builder().build(), new RewardedAdLoadCallback() {
             @Override public void onAdLoaded(RewardedAd ad) { rewardedAd = ad; }
-            @Override public void onAdFailedToLoad(LoadAdError error) { rewardedAd = null; Log.w(TAG, "Rewarded load: " + error); }
+            @Override public void onAdFailedToLoad(LoadAdError error) {
+                rewardedAd = null;
+                Log.w(TAG, "Rewarded load: " + error);
+            }
         });
     }
 
     private void showRewardedInternal(String rewardType) {
-        if (!adsInitialized) { jsRewardError("Reklam izni hazırlanıyor. Biraz sonra tekrar dene."); return; }
-        if (rewardedAd == null) { loadRewarded(); jsRewardError("Ödüllü reklam henüz hazır değil. Biraz sonra tekrar dene."); return; }
+        if (!adsInitialized) {
+            jsRewardError("Reklam izni hazırlanıyor. Biraz sonra tekrar dene.");
+            return;
+        }
+        if (rewardedAd == null) {
+            loadRewarded();
+            jsRewardError("Ödüllü reklam henüz hazır değil. Biraz sonra tekrar dene.");
+            return;
+        }
+
         pendingRewardType = rewardType == null ? "" : rewardType;
-        RewardedAd ad = rewardedAd; rewardedAd = null;
+        RewardedAd ad = rewardedAd;
+        rewardedAd = null;
         ad.setFullScreenContentCallback(new FullScreenContentCallback() {
-            @Override public void onAdDismissedFullScreenContent() { pendingRewardType = ""; js("window.CandivoAds&&window.CandivoAds.onRewardClosed()"); loadRewarded(); }
-            @Override public void onAdFailedToShowFullScreenContent(AdError error) { pendingRewardType = ""; jsRewardError("Reklam gösterilemedi."); loadRewarded(); }
+            @Override public void onAdDismissedFullScreenContent() {
+                pendingRewardType = "";
+                js("window.CandivoAds&&window.CandivoAds.onRewardClosed()");
+                loadRewarded();
+            }
+
+            @Override public void onAdFailedToShowFullScreenContent(AdError error) {
+                pendingRewardType = "";
+                jsRewardError("Reklam gösterilemedi.");
+                loadRewarded();
+            }
         });
+
         ad.show(this, reward -> {
             String kind = pendingRewardType;
             js("window.CandivoAds&&window.CandivoAds.onRewardEarned(" + q(kind) + ")");
@@ -151,14 +208,22 @@ public class MainActivity extends Activity {
         if (!adsInitialized || interstitialAd != null) return;
         InterstitialAd.load(this, BuildConfig.ADMOB_INTERSTITIAL_ID, new AdRequest.Builder().build(), new InterstitialAdLoadCallback() {
             @Override public void onAdLoaded(InterstitialAd ad) { interstitialAd = ad; }
-            @Override public void onAdFailedToLoad(LoadAdError error) { interstitialAd = null; Log.w(TAG, "Interstitial load: " + error); }
+            @Override public void onAdFailedToLoad(LoadAdError error) {
+                interstitialAd = null;
+                Log.w(TAG, "Interstitial load: " + error);
+            }
         });
     }
 
     private void showInterstitialInternal() {
         if (!adsInitialized) return;
-        if (interstitialAd == null) { loadInterstitial(); return; }
-        InterstitialAd ad = interstitialAd; interstitialAd = null;
+        if (interstitialAd == null) {
+            loadInterstitial();
+            return;
+        }
+
+        InterstitialAd ad = interstitialAd;
+        interstitialAd = null;
         ad.setFullScreenContentCallback(new FullScreenContentCallback() {
             @Override public void onAdDismissedFullScreenContent() { loadInterstitial(); }
             @Override public void onAdFailedToShowFullScreenContent(AdError error) { loadInterstitial(); }
@@ -167,19 +232,28 @@ public class MainActivity extends Activity {
     }
 
     private void showPrivacyOptionsInternal() {
-        if (consentInformation == null) { requestConsentAndInitializeAds(); return; }
+        if (consentInformation == null) {
+            requestConsentAndInitializeAds();
+            return;
+        }
         UserMessagingPlatform.showPrivacyOptionsForm(this, formError -> {
             if (formError != null) js("window.CandivoAds&&window.CandivoAds.onConsentError(" + q(formError.getMessage()) + ")");
             if (consentInformation.canRequestAds()) initializeAdsOnce();
         });
     }
 
-    private void startGoogleSignIn() { startActivityForResult(googleClient.getSignInIntent(), RC_GOOGLE); }
-    private void googleSignOut() { googleClient.signOut(); }
+    private void startGoogleSignIn() {
+        startActivityForResult(googleClient.getSignInIntent(), RC_GOOGLE);
+    }
+
+    private void googleSignOut() {
+        googleClient.signOut();
+    }
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode != RC_GOOGLE) return;
+
         Task<GoogleSignInAccount> task = GoogleSignIn.getSignedInAccountFromIntent(data);
         try {
             GoogleSignInAccount account = task.getResult(ApiException.class);
@@ -191,21 +265,57 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void jsRewardError(String message) { js("window.CandivoAds&&window.CandivoAds.onRewardError(" + q(message) + ")"); }
-    private void js(String script) { runOnUiThread(() -> { if (webView != null) webView.evaluateJavascript(script, null); }); }
-    private static String q(String value) { return JSONObject.quote(value == null ? "" : value); }
+    private void jsRewardError(String message) {
+        js("window.CandivoAds&&window.CandivoAds.onRewardError(" + q(message) + ")");
+    }
+
+    private void js(String script) {
+        runOnUiThread(() -> {
+            if (webView != null) webView.evaluateJavascript(script, null);
+        });
+    }
+
+    private static String q(String value) {
+        return JSONObject.quote(value == null ? "" : value);
+    }
 
     public final class AndroidBridge {
-        @JavascriptInterface public void googleSignIn() { runOnUiThread(MainActivity.this::startGoogleSignIn); }
-        @JavascriptInterface public void googleSignOut() { runOnUiThread(MainActivity.this::googleSignOut); }
-        @JavascriptInterface public void showRewarded(String rewardType) { runOnUiThread(() -> showRewardedInternal(rewardType)); }
-        @JavascriptInterface public void showInterstitial(String reason) { runOnUiThread(MainActivity.this::showInterstitialInternal); }
-        @JavascriptInterface public void openPrivacyOptions() { runOnUiThread(MainActivity.this::showPrivacyOptionsInternal); }
-        @JavascriptInterface public boolean isAdMobTestMode() { return BuildConfig.ADMOB_TEST_MODE; }
+        @JavascriptInterface public void googleSignIn() {
+            runOnUiThread(MainActivity.this::startGoogleSignIn);
+        }
+
+        @JavascriptInterface public void googleSignOut() {
+            runOnUiThread(MainActivity.this::googleSignOut);
+        }
+
+        @JavascriptInterface public void showRewarded(String rewardType) {
+            runOnUiThread(() -> showRewardedInternal(rewardType));
+        }
+
+        @JavascriptInterface public void showInterstitial(String reason) {
+            runOnUiThread(MainActivity.this::showInterstitialInternal);
+        }
+
+        @JavascriptInterface public void openPrivacyOptions() {
+            runOnUiThread(MainActivity.this::showPrivacyOptionsInternal);
+        }
+
+        @JavascriptInterface public boolean isAdMobTestMode() {
+            return BuildConfig.ADMOB_TEST_MODE;
+        }
+    }
+
+    @Override public void onBackPressed() {
+        if (webView != null && webView.canGoBack()) webView.goBack();
+        else super.onBackPressed();
     }
 
     @Override protected void onDestroy() {
-        if (webView != null) { webView.removeJavascriptInterface("CandivoAndroid"); webView.destroy(); webView = null; }
+        if (webView != null) {
+            webView.removeJavascriptInterface("CandivoAndroid");
+            webView.destroy();
+            webView = null;
+        }
         super.onDestroy();
     }
 }
