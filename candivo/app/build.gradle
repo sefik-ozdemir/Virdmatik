@@ -13,8 +13,8 @@ android {
         applicationId 'com.haber73.candivo'
         minSdk 23
         targetSdk 36
-        versionCode 23
-        versionName '0.12.1-test'
+        versionCode 24
+        versionName '0.13.0-test'
     }
 
     buildFeatures { buildConfig true }
