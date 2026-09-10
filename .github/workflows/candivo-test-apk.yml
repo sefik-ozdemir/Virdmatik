@@ -1,4 +1,4 @@
-name: Build Candivo v0.12.0 test APK
+name: Build Candivo v0.12.1 test APK
 
 on:
   push:
@@ -28,7 +28,7 @@ jobs:
       - name: Install Android SDK 36
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
 
-      - name: Prepare v0.12 branding and lobby UI
+      - name: Prepare v0.12.1 branding and lobby UI
         shell: bash
         run: |
           set -euo pipefail
@@ -36,6 +36,7 @@ jobs:
           node --check candivo/app/src/main/assets/ui-v012.js
           cat candivo/app/src/main/assets/ui-v012.js >> candivo/app/src/main/assets/monetization.js
           grep -q 'candivoLeaderHero' candivo/app/src/main/assets/monetization.js
+          grep -q 'candivoV0121' candivo/app/src/main/assets/monetization.js
           test -s candivo/app/src/main/res/drawable/candivo_old_logo.webp
 
       - name: Improve test ad preload retry
@@ -81,8 +82,9 @@ jobs:
           set -euo pipefail
           grep -q 'CandivoAndroid.showRewarded' candivo/app/src/main/assets/monetization.js
           grep -q 'candivoLeaderHero' candivo/app/src/main/assets/monetization.js
-          grep -q "versionCode 22" candivo/app/build.gradle
-          grep -q "0.12.0-test" candivo/app/build.gradle
+          grep -q 'candivoV0121' candivo/app/src/main/assets/monetization.js
+          grep -q "versionCode 23" candivo/app/build.gradle
+          grep -q "0.12.1-test" candivo/app/build.gradle
           grep -q '@drawable/candivo_old_logo' candivo/app/src/main/AndroidManifest.xml
           grep -q 'https://www.73haber.com.tr/candivo/' candivo/app/src/main/java/com/haber73/candivo/MainActivity.java
 
@@ -101,6 +103,6 @@ jobs:
       - name: Upload test APK
         uses: actions/upload-artifact@v4
         with:
-          name: Candivo-v0.12.0-test-apk
+          name: Candivo-v0.12.1-test-apk
           path: candivo/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
