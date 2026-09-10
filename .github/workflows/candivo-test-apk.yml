@@ -28,42 +28,27 @@ jobs:
       - name: Install Android SDK 36
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
 
-      - name: Prepare embedded Candivo v0.14 assets
+      - name: Prepare v0.14 local patches
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p candivo/app/src/main/assets candivo/app/src/main/res/drawable /tmp/candivo-web
-
-          cat candivo/webparts/assets.part* | base64 -d > /tmp/candivo-web.zip
-          unzip -q /tmp/candivo-web.zip -d /tmp/candivo-web
-          index_path="$(find /tmp/candivo-web -type f -name index.html | head -n 1)"
-          test -n "$index_path"
-          web_root="$(dirname "$index_path")"
-          rm -rf candivo/app/src/main/assets/*
-          cp -a "$web_root"/. candivo/app/src/main/assets/
-
-          cat candivo/patches/firebase-v013.part0* | base64 -d | gzip -d > candivo/app/src/main/assets/firebase-candivo.js
-          cat candivo/patches/ui-v013.js.gz.b64 candivo/patches/gameplay-v013.js.gz.b64 | base64 -d | gzip -d > candivo/app/src/main/assets/monetization.js
+          mkdir -p candivo/app/src/main/assets candivo/app/src/main/res/drawable
           base64 -d candivo/branding/candivo-old-logo.webp.b64 > candivo/app/src/main/res/drawable/candivo_old_logo.webp
-
-          python - <<'PY'
-          from pathlib import Path
-          p=Path('candivo/app/src/main/assets/index.html')
-          s=p.read_text(encoding='utf-8')
-          s=s.replace('const GAME_VERSION3="0.10.1"','const GAME_VERSION3="0.14.0-test"')
-          s=s.replace('v0.10.1','v0.14.0-test')
-          p.write_text(s,encoding='utf-8')
-          PY
-
+          base64 -d candivo/patches/ui-v013.js.gz.b64 | gzip -d > candivo/app/src/main/assets/ui-v014.js
+          base64 -d candivo/patches/gameplay-v013.js.gz.b64 | gzip -d > candivo/app/src/main/assets/gameplay-v014.js
+          cat candivo/patches/firebase-v013.part0* | base64 -d | gzip -d > candivo/app/src/main/assets/firebase-candivo.js
+          node --check candivo/app/src/main/assets/ui-v014.js
+          node --check candivo/app/src/main/assets/gameplay-v014.js
           node --check candivo/app/src/main/assets/firebase-candivo.js
-          node --check candivo/app/src/main/assets/monetization.js
-          grep -q 'CLIENT_BUILD="0.14.0-test"' candivo/app/src/main/assets/firebase-candivo.js
+          cat candivo/app/src/main/assets/ui-v014.js >> candivo/app/src/main/assets/monetization.js
+          cat candivo/app/src/main/assets/gameplay-v014.js >> candivo/app/src/main/assets/monetization.js
+          grep -q 'candivoLeaderHero' candivo/app/src/main/assets/monetization.js
+          grep -q 'Hedef katkısı' candivo/app/src/main/assets/monetization.js
           grep -q 'CandivoOpenPublicProfile' candivo/app/src/main/assets/firebase-candivo.js
           grep -q 'candivo-profile-ready' candivo/app/src/main/assets/firebase-candivo.js
           grep -q 'rematchRoomId' candivo/app/src/main/assets/firebase-candivo.js
-          grep -q 'Hedef katkısı' candivo/app/src/main/assets/monetization.js
 
-      - name: Patch Android shell for embedded test build
+      - name: Patch Android shell and version
         shell: bash
         run: |
           set -euo pipefail
@@ -78,8 +63,11 @@ jobs:
 
           p=Path('candivo/app/src/main/java/com/haber73/candivo/MainActivity.java')
           s=p.read_text()
-          s=s.replace('s.setAllowFileAccess(false);','s.setAllowFileAccess(true);\n        if (android.os.Build.VERSION.SDK_INT >= 16) {\n            s.setAllowFileAccessFromFileURLs(true);\n            s.setAllowUniversalAccessFromFileURLs(true);\n        }')
-          s=s.replace('webView.loadUrl(GAME_URL);','webView.loadUrl("file:///android_asset/index.html");')
+          old='''            @Override public boolean shouldOverrideUrlLoading(WebView view, String url) {\n                return openExternalIfNeeded(Uri.parse(url));\n            }\n\n            @Override public void onPageFinished(WebView view, String url) {'''
+          new='''            @Override public boolean shouldOverrideUrlLoading(WebView view, String url) {\n                return openExternalIfNeeded(Uri.parse(url));\n            }\n\n            @Override public android.webkit.WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {\n                Uri uri = request.getUrl();\n                String path = uri == null ? null : uri.getPath();\n                if (isCandivoUrl(uri) && path != null && path.endsWith("/firebase-candivo.js")) {\n                    try {\n                        return new android.webkit.WebResourceResponse("application/javascript", "UTF-8", getAssets().open("firebase-candivo.js"));\n                    } catch (Exception error) {\n                        Log.e(TAG, "Local Firebase v0.14 patch failed", error);\n                    }\n                }\n                return super.shouldInterceptRequest(view, request);\n            }\n\n            @Override public void onPageFinished(WebView view, String url) {'''
+          if 'shouldInterceptRequest(WebView view, WebResourceRequest request)' not in s:
+              if old not in s: raise SystemExit('WebView interceptor patch target missing')
+              s=s.replace(old,new,1)
 
           old='''            @Override public void onAdFailedToLoad(LoadAdError error) {\n                rewardedAd = null;\n                Log.w(TAG, "Rewarded load: " + error);\n            }'''
           new='''            @Override public void onAdFailedToLoad(LoadAdError error) {\n                rewardedAd = null;\n                Log.w(TAG, "Rewarded load: " + error);\n                if (webView != null) webView.postDelayed(() -> loadRewarded(), 4000);\n            }'''
@@ -95,38 +83,22 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          grep -q 'file:///android_asset/index.html' candivo/app/src/main/java/com/haber73/candivo/MainActivity.java
+          grep -q 'shouldInterceptRequest' candivo/app/src/main/java/com/haber73/candivo/MainActivity.java
+          grep -q 'firebase-candivo.js' candivo/app/src/main/java/com/haber73/candivo/MainActivity.java
           grep -q "versionCode 25" candivo/app/build.gradle
           grep -q "0.14.0-test" candivo/app/build.gradle
-          grep -q '0.14.0-test' candivo/app/src/main/assets/index.html
           grep -q 'CandivoAndroid.showRewarded' candivo/app/src/main/assets/monetization.js
           grep -q 'candivoLeaderHero' candivo/app/src/main/assets/monetization.js
           grep -q 'CandivoOpenPublicProfile' candivo/app/src/main/assets/firebase-candivo.js
+          grep -q 'candivo-profile-ready' candivo/app/src/main/assets/firebase-candivo.js
           grep -q 'rematchRoomId' candivo/app/src/main/assets/firebase-candivo.js
           grep -q '@drawable/candivo_old_logo' candivo/app/src/main/AndroidManifest.xml
-
-      - name: Package Android signing tools
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p signing-tools/lib
-          cp "$ANDROID_HOME/build-tools/36.0.0/apksigner" signing-tools/
-          cp "$ANDROID_HOME/build-tools/36.0.0/zipalign" signing-tools/
-          cp "$ANDROID_HOME/build-tools/36.0.0/lib/apksigner.jar" signing-tools/lib/
-          chmod +x signing-tools/apksigner signing-tools/zipalign
-
-      - name: Upload Android signing tools
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-signing-tools-36-v014
-          path: signing-tools
-          if-no-files-found: error
 
       - name: Build debug APK
         working-directory: candivo
         run: gradle :app:assembleDebug --stacktrace
 
-      - name: Verify APK exists
+      - name: Verify APK
         shell: bash
         run: |
           set -euo pipefail
