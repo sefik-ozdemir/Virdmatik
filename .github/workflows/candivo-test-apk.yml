@@ -1,4 +1,4 @@
-name: Build Candivo v0.11.0 test APK
+name: Build Candivo v0.12.0 test APK
 
 on:
   push:
@@ -28,6 +28,36 @@ jobs:
       - name: Install Android SDK 36
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
 
+      - name: Prepare v0.12 branding and lobby UI
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 -d candivo/branding/candivo-old-logo.webp.b64 > candivo/app/src/main/res/drawable/candivo_old_logo.webp
+          node --check candivo/app/src/main/assets/ui-v012.js
+          cat candivo/app/src/main/assets/ui-v012.js >> candivo/app/src/main/assets/monetization.js
+          grep -q 'candivoLeaderHero' candivo/app/src/main/assets/monetization.js
+          test -s candivo/app/src/main/res/drawable/candivo_old_logo.webp
+
+      - name: Improve test ad preload retry
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('candivo/app/src/main/java/com/haber73/candivo/MainActivity.java')
+          s=p.read_text()
+          old='''            @Override public void onAdFailedToLoad(LoadAdError error) {\n                rewardedAd = null;\n                Log.w(TAG, "Rewarded load: " + error);\n            }'''
+          new='''            @Override public void onAdFailedToLoad(LoadAdError error) {\n                rewardedAd = null;\n                Log.w(TAG, "Rewarded load: " + error);\n                if (webView != null) webView.postDelayed(() -> loadRewarded(), 3000);\n            }'''
+          if old not in s:
+              raise SystemExit('Rewarded callback patch target missing')
+          s=s.replace(old,new,1)
+          old2='''            @Override public void onAdFailedToLoad(LoadAdError error) {\n                interstitialAd = null;\n                Log.w(TAG, "Interstitial load: " + error);\n            }'''
+          new2='''            @Override public void onAdFailedToLoad(LoadAdError error) {\n                interstitialAd = null;\n                Log.w(TAG, "Interstitial load: " + error);\n                if (webView != null) webView.postDelayed(() -> loadInterstitial(), 6000);\n            }'''
+          if old2 not in s:
+              raise SystemExit('Interstitial callback patch target missing')
+          p.write_text(s.replace(old2,new2,1))
+          PY
+
       - name: Package Android signing tools
         shell: bash
         run: |
@@ -37,7 +67,6 @@ jobs:
           cp "$ANDROID_HOME/build-tools/36.0.0/zipalign" signing-tools/
           cp "$ANDROID_HOME/build-tools/36.0.0/lib/apksigner.jar" signing-tools/lib/
           chmod +x signing-tools/apksigner signing-tools/zipalign
-          ls -lh signing-tools signing-tools/lib
 
       - name: Upload Android signing tools
         uses: actions/upload-artifact@v4
@@ -46,12 +75,15 @@ jobs:
           path: signing-tools
           if-no-files-found: error
 
-      - name: Verify bundled monetization bridge
+      - name: Verify test configuration
         shell: bash
         run: |
           set -euo pipefail
-          test -s candivo/app/src/main/assets/monetization.js
           grep -q 'CandivoAndroid.showRewarded' candivo/app/src/main/assets/monetization.js
+          grep -q 'candivoLeaderHero' candivo/app/src/main/assets/monetization.js
+          grep -q "versionCode 22" candivo/app/build.gradle
+          grep -q "0.12.0-test" candivo/app/build.gradle
+          grep -q '@drawable/candivo_old_logo' candivo/app/src/main/AndroidManifest.xml
           grep -q 'https://www.73haber.com.tr/candivo/' candivo/app/src/main/java/com/haber73/candivo/MainActivity.java
 
       - name: Build debug APK
@@ -69,6 +101,6 @@ jobs:
       - name: Upload test APK
         uses: actions/upload-artifact@v4
         with:
-          name: Candivo-v0.11.0-test-apk
+          name: Candivo-v0.12.0-test-apk
           path: candivo/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
