@@ -28,18 +28,13 @@ jobs:
       - name: Install Android SDK 36
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
 
-      - name: Restore embedded Candivo web assets
+      - name: Verify bundled monetization bridge
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p candivo/app/src/main/assets
-          cat candivo/webparts/assets.part* | base64 -d > /tmp/candivo-web-assets.zip
-          unzip -t /tmp/candivo-web-assets.zip
-          unzip -o /tmp/candivo-web-assets.zip -d candivo/app/src/main/assets
-          test -s candivo/app/src/main/assets/index.html
-          test -s candivo/app/src/main/assets/firebase-candivo.js
-          grep -q 'monetization.js' candivo/app/src/main/assets/index.html
-          ls -lh candivo/app/src/main/assets
+          test -s candivo/app/src/main/assets/monetization.js
+          grep -q 'CandivoAndroid.showRewarded' candivo/app/src/main/assets/monetization.js
+          grep -q 'https://www.73haber.com.tr/candivo/' candivo/app/src/main/java/com/haber73/candivo/MainActivity.java
 
       - name: Build debug APK
         working-directory: candivo
@@ -48,6 +43,7 @@ jobs:
       - name: Verify APK
         shell: bash
         run: |
+          set -euo pipefail
           test -f candivo/app/build/outputs/apk/debug/app-debug.apk
           ls -lh candivo/app/build/outputs/apk/debug/app-debug.apk
           sha256sum candivo/app/build/outputs/apk/debug/app-debug.apk
