@@ -1,4 +1,4 @@
-name: Build Candivo v0.12.1 test APK
+name: Build Candivo v0.13.0 test APK
 
 on:
   push:
@@ -28,18 +28,47 @@ jobs:
       - name: Install Android SDK 36
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
 
-      - name: Prepare v0.12.1 branding and lobby UI
+      - name: Prepare v0.13 lobby, profiles and duel fixes
         shell: bash
         run: |
           set -euo pipefail
           base64 -d candivo/branding/candivo-old-logo.webp.b64 > candivo/app/src/main/res/drawable/candivo_old_logo.webp
-          node --check candivo/app/src/main/assets/ui-v012.js
-          cat candivo/app/src/main/assets/ui-v012.js >> candivo/app/src/main/assets/monetization.js
-          grep -q 'candivoLeaderHero' candivo/app/src/main/assets/monetization.js
-          grep -q 'candivoV0121' candivo/app/src/main/assets/monetization.js
-          test -s candivo/app/src/main/res/drawable/candivo_old_logo.webp
+          base64 -d candivo/patches/ui-v013.js.gz.b64 | gzip -d > candivo/app/src/main/assets/ui-v013.js
+          base64 -d candivo/patches/gameplay-v013.js.gz.b64 | gzip -d > candivo/app/src/main/assets/gameplay-v013.js
+          curl -fsSL --retry 3 --retry-delay 2 "https://www.73haber.com.tr/candivo/firebase-candivo.js" -o candivo/app/src/main/assets/firebase-candivo.js
+          node --check candivo/app/src/main/assets/ui-v013.js
+          node --check candivo/app/src/main/assets/gameplay-v013.js
+          node --check candivo/app/src/main/assets/firebase-candivo.js
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('candivo/app/src/main/assets/firebase-candivo.js')
+          s=p.read_text()
+          def rep(old,new,label):
+              global s
+              if old not in s:
+                  raise SystemExit('firebase patch target missing: '+label)
+              s=s.replace(old,new,1)
 
-      - name: Improve test ad preload retry
+          helper='''async function normalizeSettlementProfile(profileRef){\n  const snap=await profileRef.get();if(!snap.exists)throw new Error("Oyuncu profili bulunamadı.");const d=snap.data()||{},trophies=Math.max(0,Number(d.trophies)||0),wins=Math.max(0,Number(d.wins)||0),losses=Math.max(0,Number(d.losses)||0),level=Math.max(1,Number(d.level)||Number(unlockedLevel3)||1),diamonds=Math.max(0,Number(d.diamonds)||Number(coins3)||0),province=normalizeProvince(d.province||""),fallback="Oyuncu_"+user.uid.slice(-5),name=(cleanName(d.username||profile3.name||fallback)||fallback).slice(0,16),payload={uid:user.uid,username:name,usernameLower:name.toLocaleLowerCase("tr-TR"),avatar:d.avatar||profile3.avatar||"🧙‍♀️",country:"TR",province:province,region:provinceRegion(province),displayTitle:typeof d.displayTitle==="string"?d.displayTitle:"Candivo Oyuncusu",rankFrame:typeof d.rankFrame==="string"?d.rankFrame:"",trophies:trophies,wins:wins,losses:losses,level:level,diamonds:diamonds,rankScore:rankUnits(trophies,level,diamonds),updatedAt:firebase.firestore.FieldValue.serverTimestamp()};const photo=safePhoto(d.photoUrl||user.photoURL);if(photo)payload.photoUrl=photo;await profileRef.set(payload,{merge:true});\n}\n\n'''
+          rep('function buildOnlineSettlement(data,settlementId,result){',helper+'function buildOnlineSettlement(data,settlementId,result){','settlement helper')
+          rep('const safeRound=Math.max(1,Number(round)||1),settlementId=String(ref&&ref.key||online.roomId||"duel")+":r"+String(safeRound),profileRef=store.collection("users").doc(user.uid);','const safeRound=Math.max(1,Number(round)||1),settlementId=String(ref&&ref.key||online.roomId||"duel")+":r"+String(safeRound),profileRef=store.collection("users").doc(user.uid);await normalizeSettlementProfile(profileRef);','normalize before settle')
+          rep('userProfile=Object.assign({},userProfile||{},{trophies:settled.trophies,wins:settled.wins,losses:settled.losses,settledDuelIds:settled.settledDuelIds,lastDuelSettlement:settlementId});\n  profile3.trophies=settled.trophies;profile3.duelWins=settled.wins;profile3.duelLosses=settled.losses;saveProfile3();','const verifiedSnap=await profileRef.get(),verified=verifiedSnap.data()||{};if(Number(verified.trophies)!==Number(settled.trophies)||Number(verified.wins)!==Number(settled.wins)||Number(verified.losses)!==Number(settled.losses))throw new Error("Kupa kaydı sunucuda doğrulanamadı.");\n  userProfile=Object.assign({},userProfile||{},verified,{settledDuelIds:settled.settledDuelIds,lastDuelSettlement:settlementId});\n  profile3.trophies=Number(verified.trophies)||0;profile3.duelWins=Number(verified.wins)||0;profile3.duelLosses=Number(verified.losses)||0;saveProfile3();settled.trophies=profile3.trophies;settled.wins=profile3.duelWins;settled.losses=profile3.duelLosses;settled.verified=true;','verify trophy write')
+          rep('function listenRoom(ref,type){','function listenRoom(ref,type,expectedRound){','listen signature')
+          rep('const ids=roomPlayers(data);if(ids.length!==2)return;const other=ids.find(function(uid){return uid!==user.uid;});online.otherUid=other;online.otherName=data.players[other]&&data.players[other].name||"Rakip";online.round=Number(data.round)||1;','const ids=roomPlayers(data);if(ids.length!==2)return;const other=ids.find(function(uid){return uid!==user.uid;}),dataRound=Number(data.round)||1;if(expectedRound&&dataRound<expectedRound)return;if(expectedRound&&dataRound===expectedRound&&data.status!=="active")return;online.otherUid=other;online.otherName=data.players[other]&&data.players[other].name||"Rakip";online.round=dataRound;','round guard')
+          rep('if(!online.ready)beginOnlineDuel(data);','if(!online.ready&&data.status!=="active")return;if(!online.ready)beginOnlineDuel(data);','finished-room guard')
+          rep('if(data.status==="active"&&(Number(data.round)||1)>finishedRound){stopRematchListener();if(overlayEl&&overlayEl.isConnected)overlayEl.remove();listenRoom(ref,type);return;}','if(data.status==="active"&&(Number(data.round)||1)>finishedRound){const nextRound=Number(data.round)||finishedRound+1;stopRematchListener();if(overlayEl&&overlayEl.isConnected)overlayEl.remove();listenRoom(ref,type,nextRound);return;}','strict rematch round')
+          rep('window.CandivoSocial={showSocial:showSocial,showAccount:showAccount,showPrivateRoom:showPrivateRoom,showRoomChat:showRoomChat};','window.CandivoSocial={showSocial:showSocial,showAccount:showAccount,showPrivateRoom:showPrivateRoom,showRoomChat:showRoomChat,showPublicProfile:function(uid){return showPublicProfile(uid);},showCloudProfile:function(scope){return showCloudProfile(scope||"world");}};','public profile exposure')
+          p.write_text(s)
+          PY
+          node --check candivo/app/src/main/assets/firebase-candivo.js
+          cat candivo/app/src/main/assets/ui-v013.js >> candivo/app/src/main/assets/monetization.js
+          cat candivo/app/src/main/assets/gameplay-v013.js >> candivo/app/src/main/assets/monetization.js
+          grep -q 'candivoLeaderHero' candivo/app/src/main/assets/monetization.js
+          grep -q 'Hedef katkısı' candivo/app/src/main/assets/monetization.js
+          grep -q 'showPublicProfile' candivo/app/src/main/assets/firebase-candivo.js
+          grep -q 'expectedRound' candivo/app/src/main/assets/firebase-candivo.js
+
+      - name: Patch WebView interception and ad preload retry
         shell: bash
         run: |
           set -euo pipefail
@@ -47,16 +76,18 @@ jobs:
           from pathlib import Path
           p=Path('candivo/app/src/main/java/com/haber73/candivo/MainActivity.java')
           s=p.read_text()
+          old='''            @Override public boolean shouldOverrideUrlLoading(WebView view, String url) {\n                return openExternalIfNeeded(Uri.parse(url));\n            }\n\n            @Override public void onPageFinished(WebView view, String url) {'''
+          new='''            @Override public boolean shouldOverrideUrlLoading(WebView view, String url) {\n                return openExternalIfNeeded(Uri.parse(url));\n            }\n\n            @Override public android.webkit.WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {\n                Uri uri = request.getUrl();\n                String path = uri == null ? null : uri.getPath();\n                if (isCandivoUrl(uri) && path != null && path.endsWith("/firebase-candivo.js")) {\n                    try {\n                        return new android.webkit.WebResourceResponse("application/javascript", "UTF-8", getAssets().open("firebase-candivo.js"));\n                    } catch (Exception error) {\n                        Log.e(TAG, "Local Firebase duel patch failed", error);\n                    }\n                }\n                return super.shouldInterceptRequest(view, request);\n            }\n\n            @Override public void onPageFinished(WebView view, String url) {'''
+          if old not in s: raise SystemExit('WebView interceptor patch target missing')
+          s=s.replace(old,new,1)
           old='''            @Override public void onAdFailedToLoad(LoadAdError error) {\n                rewardedAd = null;\n                Log.w(TAG, "Rewarded load: " + error);\n            }'''
           new='''            @Override public void onAdFailedToLoad(LoadAdError error) {\n                rewardedAd = null;\n                Log.w(TAG, "Rewarded load: " + error);\n                if (webView != null) webView.postDelayed(() -> loadRewarded(), 3000);\n            }'''
-          if old not in s:
-              raise SystemExit('Rewarded callback patch target missing')
+          if old not in s: raise SystemExit('Rewarded callback patch target missing')
           s=s.replace(old,new,1)
-          old2='''            @Override public void onAdFailedToLoad(LoadAdError error) {\n                interstitialAd = null;\n                Log.w(TAG, "Interstitial load: " + error);\n            }'''
-          new2='''            @Override public void onAdFailedToLoad(LoadAdError error) {\n                interstitialAd = null;\n                Log.w(TAG, "Interstitial load: " + error);\n                if (webView != null) webView.postDelayed(() -> loadInterstitial(), 6000);\n            }'''
-          if old2 not in s:
-              raise SystemExit('Interstitial callback patch target missing')
-          p.write_text(s.replace(old2,new2,1))
+          old='''            @Override public void onAdFailedToLoad(LoadAdError error) {\n                interstitialAd = null;\n                Log.w(TAG, "Interstitial load: " + error);\n            }'''
+          new='''            @Override public void onAdFailedToLoad(LoadAdError error) {\n                interstitialAd = null;\n                Log.w(TAG, "Interstitial load: " + error);\n                if (webView != null) webView.postDelayed(() -> loadInterstitial(), 6000);\n            }'''
+          if old not in s: raise SystemExit('Interstitial callback patch target missing')
+          p.write_text(s.replace(old,new,1))
           PY
 
       - name: Package Android signing tools
@@ -82,11 +113,14 @@ jobs:
           set -euo pipefail
           grep -q 'CandivoAndroid.showRewarded' candivo/app/src/main/assets/monetization.js
           grep -q 'candivoLeaderHero' candivo/app/src/main/assets/monetization.js
-          grep -q 'candivoV0121' candivo/app/src/main/assets/monetization.js
-          grep -q "versionCode 23" candivo/app/build.gradle
-          grep -q "0.12.1-test" candivo/app/build.gradle
+          grep -q 'Hedef katkısı' candivo/app/src/main/assets/monetization.js
+          grep -q 'shouldInterceptRequest' candivo/app/src/main/java/com/haber73/candivo/MainActivity.java
+          grep -q 'firebase-candivo.js' candivo/app/src/main/java/com/haber73/candivo/MainActivity.java
+          grep -q 'expectedRound' candivo/app/src/main/assets/firebase-candivo.js
+          grep -q 'verified=true' candivo/app/src/main/assets/firebase-candivo.js
+          grep -q "versionCode 24" candivo/app/build.gradle
+          grep -q "0.13.0-test" candivo/app/build.gradle
           grep -q '@drawable/candivo_old_logo' candivo/app/src/main/AndroidManifest.xml
-          grep -q 'https://www.73haber.com.tr/candivo/' candivo/app/src/main/java/com/haber73/candivo/MainActivity.java
 
       - name: Build debug APK
         working-directory: candivo
@@ -103,6 +137,6 @@ jobs:
       - name: Upload test APK
         uses: actions/upload-artifact@v4
         with:
-          name: Candivo-v0.12.1-test-apk
+          name: Candivo-v0.13.0-test-apk
           path: candivo/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
